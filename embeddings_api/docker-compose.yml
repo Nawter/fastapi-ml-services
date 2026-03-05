@@ -1,0 +1,16 @@
+version: '3.9'
+
+services:
+  embeddings:
+    build: .
+    ports:
+      - '8001:8000'
+    volumes:
+      - ~/.cache/huggingface:/cache/huggingface
+      - ~/.cache/torch/sentence_transformers:/cache/sentence-transformers
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8000/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped

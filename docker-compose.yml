@@ -1,0 +1,51 @@
+version: '3.9'
+
+# Run all 3 services together:
+#   docker compose up --build
+#
+# Individual services:
+#   docker compose up classifier
+#   docker compose up embeddings
+#   docker compose up tagger
+
+services:
+  classifier:
+    build: ./reviews_api
+    ports:
+      - '8000:8000'
+    volumes:
+      - ~/.cache/huggingface:/cache/huggingface
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8000/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  embeddings:
+    build: ./embeddings_api
+    ports:
+      - '8001:8000'
+    volumes:
+      - ~/.cache/huggingface:/cache/huggingface
+      - ~/.cache/torch/sentence_transformers:/cache/sentence-transformers
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8000/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  tagger:
+    build: ./tagger_api
+    ports:
+      - '8002:8000'
+    volumes:
+      - ~/.cache/huggingface:/cache/huggingface
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8000/health']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
