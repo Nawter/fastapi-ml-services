@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
 
     try:
         app.state.summariser = pipeline(
-            "summarization",
+            "text2text-generation",
             model="facebook/bart-large-cnn",
             device=-1,
         )
@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
         raise
 
     # Warm up all three before accepting traffic
-    app.state.summariser("warm up text here for the model", max_length=10, min_length=5)
+    app.state.summariser("warm up text here for the model", max_length=10)
     app.state.sentiment("warm up")
     app.state.ner("warm up")
 
@@ -99,12 +99,9 @@ def _process_one(text: str, app) -> ProcessResult:
 
     # Summarise — BART needs explicit length params
     summary_raw = app.state.summariser(
-        text,
-        max_length=60,
-        min_length=15,
-        do_sample=False,  # deterministic output
+        text, max_length=60, do_sample=False
     )
-    summary = summary_raw[0]["summary_text"]
+    summary = summary_raw[0]["generated_text"],
 
     # Sentiment — truncate to 512 tokens (model limit)
     sent_raw = app.state.sentiment(text[:512])
