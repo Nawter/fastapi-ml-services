@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
             "ner",
             model="dbmdz/bert-large-cased-finetuned-conll03-english",
             aggregation_strategy="simple",  # merges sub-tokens into whole words
-            device=-1,
+            device=0,
         )
     except Exception as e:
         logger.error(f"FATAL: Model loading failed: {e}")

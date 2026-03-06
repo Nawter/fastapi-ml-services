@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
         app.state.classifier = pipeline(
             "text-classification",
             model="distilbert-base-uncased-finetuned-sst-2-english",
-            device=-1,  # -1 = CPU, 0 = first GPU
+            device=0,  # -1 = CPU, 0 = first GPU
         )
     except Exception as e:
         logger.error(f"FATAL: Failed to load model: {e}")
