@@ -1,11 +1,25 @@
+.DS_Store
+# IDE
+.idea/
+*.iml
+
+# Python
 venv/
 .venv/
 __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+
+# Environment
 .env
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Distribution
 *.egg-info/
 dist/
 build/
-.DS_Store
