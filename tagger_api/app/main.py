@@ -2,6 +2,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from transformers import pipeline
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+import torch
 from loguru import logger
 import time
 
@@ -14,45 +16,37 @@ from app.schemas import (
 
 
 # ── Lifespan: load all 3 models once at startup ───────────────────────────────
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Loading 3 models — this may take a moment on first run")
-    t0 = time.time()
 
-    try:
-        app.state.summariser = pipeline(
-            "text2text-generation",
-            model="facebook/bart-large-cnn",
-            device=-1,
-        )
-        app.state.sentiment = pipeline(
-            "text-classification",
-            model="distilbert-base-uncased-finetuned-sst-2-english",
-            device=-1,
-        )
-        app.state.ner = pipeline(
-            "ner",
-            model="dbmdz/bert-large-cased-finetuned-conll03-english",
-            aggregation_strategy="simple",  # merges sub-tokens into whole words
-            device=0,
-        )
-    except Exception as e:
-        logger.error(f"FATAL: Model loading failed: {e}")
-        raise
+    # Load summariser manually — avoids pipeline task registry issue
+    app.state.sum_tokenizer = AutoTokenizer.from_pretrained(
+        "facebook/bart-large-cnn"
+    )
+    app.state.sum_model = AutoModelForSeq2SeqLM.from_pretrained(
+        "facebook/bart-large-cnn"
+    )
 
-    # Warm up all three before accepting traffic
-    app.state.summariser("warm up text here for the model", max_length=10)
+    app.state.sentiment = pipeline(
+        "text-classification",
+        model="distilbert-base-uncased-finetuned-sst-2-english",
+        device=0,
+    )
+    app.state.ner = pipeline(
+        "ner",
+        model="dbmdz/bert-large-cased-finetuned-conll03-english",
+        aggregation_strategy="simple",
+        device=0,
+    )
     app.state.sentiment("warm up")
     app.state.ner("warm up")
-
-    logger.info(f"All 3 models ready in {(time.time() - t0) * 1000:.0f}ms")
+    logger.info("All models ready")
     yield
-
-    app.state.summariser = None
-    app.state.sentiment = None
-    app.state.ner = None
-    logger.info("Shut down — models released")
-
+    app.state.sum_tokenizer = app.state.sum_model = None
+    app.state.sentiment = app.state.ner = None
 
 app = FastAPI(
     title="Document Tagger",
@@ -94,14 +88,20 @@ async def general_error_handler(request: Request, exc: Exception):
 
 
 # ── Helper ─────────────────────────────────────────────────────────────────────
+def _summarise(text: str, app) -> str:
+    inputs = app.state.sum_tokenizer(
+        text, return_tensors="pt", max_length=512, truncation=True
+    )
+    ids = app.state.sum_model.generate(
+        inputs["input_ids"], max_length=60, min_length=15, do_sample=False
+    )
+    return app.state.sum_tokenizer.decode(ids[0], skip_special_tokens=True)
+
 def _process_one(text: str, app) -> ProcessResult:
     """Run all three models on a single text. Shared by both endpoints."""
 
     # Summarise — BART needs explicit length params
-    summary_raw = app.state.summariser(
-        text, max_length=60, do_sample=False
-    )
-    summary = summary_raw[0]["generated_text"],
+    summary = _summarise(text, app)
 
     # Sentiment — truncate to 512 tokens (model limit)
     sent_raw = app.state.sentiment(text[:512])
@@ -131,9 +131,11 @@ def _process_one(text: str, app) -> ProcessResult:
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
-    all_loaded = all(
-        [app.state.summariser, app.state.sentiment, app.state.ner]
-    )
+    all_loaded = all([
+        app.state.sum_model,
+        app.state.sentiment,
+        app.state.ner
+    ])
     return {
         "status": "ok" if all_loaded else "degraded",
         "models": {
@@ -147,14 +149,14 @@ def health():
 
 @app.post("/process", response_model=ProcessResult)
 def process(request: ProcessRequest):
-    if not all([app.state.summariser, app.state.sentiment, app.state.ner]):
+    if not all([app.state.sum_model, app.state.sentiment, app.state.ner]):
         raise HTTPException(503, "Models not ready")
     return _process_one(request.text, app)
 
 
 @app.post("/process/batch")
 def process_batch(request: BatchProcessRequest):
-    if not all([app.state.summariser, app.state.sentiment, app.state.ner]):
+    if not all([app.state.sum_model, app.state.sentiment, app.state.ner]):
         raise HTTPException(503, "Models not ready")
     results = [_process_one(t, app) for t in request.texts]
     return {"results": [r.model_dump() for r in results], "total": len(results)}
